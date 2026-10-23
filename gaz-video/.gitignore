@@ -1,0 +1,8 @@
+data/
+output/_parts/
+output/stills/
+output/*_video.mp4
+output/render.log
+__pycache__/
+output/*.mp4
+output/*.wav

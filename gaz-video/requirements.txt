@@ -1,0 +1,7 @@
+numpy>=2.0
+opencv-python-headless>=4.9
+skia-python>=87.6
+shapely>=2.0
+scipy>=1.11
+pedalboard>=0.9
+pyloudnorm>=0.1.1
