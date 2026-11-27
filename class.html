@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>КЛАСС.ASCII</title>
+<style>
+  html,body{margin:0;background:#020503}
+  #spacer{height:900vh}
+  canvas{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="ASCII-класс: учитель выбирает учеников, пока вы прокручиваете страницу"></canvas>
+<div id="spacer"></div>
+<script>
+(() => {
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const NAMES = ['Айбек','Диана','Тимур','Лола','Артём','Мадина','Саша','Камол','Нина','Руслан'];
+const ROUNDS = [
+  { q: '2 + 2 = ?',         a: 'Четыре!' },
+  { q: '√81 = ?',           a: 'Девять!' },
+  { q: 'Столица Франции?',  a: 'Париж!' },
+  { q: '7 × 8 = ?',         a: '56!' },
+];
+const R = ROUNDS.length, INTRO = .5, OUTRO = 1, TOTAL = INTRO + R + OUTRO;
+const G = '#5f8', A = '#fb4', C = '#7df', DIM = 'rgba(120,200,140,.55)';
+
+// ---------- сценарий (случайный на каждую загрузку, дальше детерминированный) ----------
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const plan = []; { const chosen = [], raised = new Set();
+  for (let r = 0; r < R; r++) {
+    const pool = [...Array(10).keys()].filter(i => !chosen.includes(i));
+    const fresh = shuffle(pool.filter(i => !raised.has(i))), seen = shuffle(pool.filter(i => raised.has(i)));
+    const order = shuffle(fresh.concat(seen).slice(0, 3)); // 3 случайных, «другие» — приоритет тем, кто ещё не тянул руку
+    const pick = order[Math.random() * 3 | 0];
+    order.forEach(i => raised.add(i)); chosen.push(pick); plan.push({ order, pick });
+  } }
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const ease = x => x * x * (3 - 2 * x);
+
+function stateAt(u) {
+  const S = Array.from({ length: 10 }, () => ({ hand: 0, lift: 0, mark: false, done: false }));
+  const o = { S, q: 'Урок начинается…', say: 'Садитесь, начинаем.', ray: null, bubble: null, round: 0, answered: 0, end: false };
+  for (let r = 0; r < R; r++) {
+    const f = u - INTRO - r, { order, pick } = plan[r];
+    if (f >= 1) { S[pick].done = true; o.answered++; continue; }
+    if (f < 0) continue;
+    o.round = r + 1; o.q = ROUNDS[r].q;
+    order.forEach((i, k) => {
+      let a = clamp((f - k * .07) / .1);
+      if (f >= .45) a = 1 - clamp((f - .45) / (i === pick ? .05 : .08));
+      S[i].hand = a;
+    });
+    if (f >= .3) S[pick].mark = true;
+    S[pick].lift = f < .45 ? 0 : f < .55 ? 2 * ease((f - .45) / .1) : f < .8 ? 2 : f < .9 ? 2 * (1 - ease((f - .8) / .1)) : 0;
+    if (f >= .3 && f < .6) o.ray = { to: pick, p: clamp((f - .3) / .12) };
+    o.say = f < .3 ? 'Кто знает ответ?' : f < .5 ? `${NAMES[pick]}, прошу!` : f < .58 ? '' : f < .8 ? 'Слушаем…' : f < .9 ? 'Верно! Садись.' : (r < R - 1 ? 'Так, кто дальше?' : 'Отлично!');
+    if (f >= .58 && f < .8) o.bubble = { i: pick, s: ROUNDS[r].a };
+  }
+  const g = u - INTRO - R;
+  if (g >= 0) {
+    o.end = true; o.round = R; o.answered = R; o.q = `${R} из 10 ответили`; o.say = 'Урок окончен!';
+    const lift = 2 * ease(clamp((g - .1) / .4));
+    plan.forEach(p => { S[p.pick].done = true; S[p.pick].lift = lift; S[p.pick].mark = true; });
+  }
+  return o;
+}
+
+// ---------- сетка ----------
+let W, H, cols, rows, cw, ch, dpr, L;
+let chars, colr;
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const fs = W < 600 ? 11 : 14;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = `${fs}px "DejaVu Sans Mono", Menlo, Consolas, monospace`; ctx.textBaseline = 'top';
+  cw = ctx.measureText('M').width; ch = Math.round(fs * 1.15);
+  cols = Math.floor(W / cw); rows = Math.floor(H / ch);
+  chars = new Array(cols * rows); colr = new Array(cols * rows);
+  // раскладка
+  let boardH = 7; if (rows < 36) boardH = 5;
+  const deskA = 3 + boardH + 6;
+  const pitch = Math.max(7, Math.min(10, rows - 7 - deskA));
+  const colW = Math.max(9, Math.min(12, Math.floor((cols - 2) / 5)));
+  L = { boardH, deskA, pitch, colW, x0: Math.floor((cols - colW * 5) / 2) };
+}
+addEventListener('resize', resize); resize();
+
+const put = (x, y, c, k) => { if (x < 0 || y < 0 || x >= cols || y >= rows) return; chars[y * cols + x] = c; colr[y * cols + x] = k; };
+const text = (x, y, s, k) => { for (let i = 0; i < s.length; i++) if (s[i] !== ' ') put(x + i, y, s[i], k); };
+const textBg = (x, y, s, k) => { for (let i = 0; i < s.length; i++) put(x + i, y, s[i], k); };
+function box(x0, y0, w, h, k) {
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) put(x0 + x, y0 + y, ' ', null);
+  for (let x = 1; x < w - 1; x++) { put(x0 + x, y0, '─', k); put(x0 + x, y0 + h - 1, '─', k); }
+  for (let y = 1; y < h - 1; y++) { put(x0, y0 + y, '│', k); put(x0 + w - 1, y0 + y, '│', k); }
+  put(x0, y0, '┌', k); put(x0 + w - 1, y0, '┐', k); put(x0, y0 + h - 1, '└', k); put(x0 + w - 1, y0 + h - 1, '┘', k);
+}
+const centerText = (cx, y, s, k) => textBg(Math.round(cx - s.length / 2), y, s, k);
+
+// ---------- рисование ----------
+function studentPos(i) {
+  const row = i < 5 ? 0 : 1, col = i % 5;
+  return { cx: L.x0 + col * L.colW + Math.floor(L.colW / 2), desk: L.deskA + row * L.pitch };
+}
+function drawStudent(i, st, t) {
+  const { cx, desk } = studentPos(i);
+  const lift = Math.round(st.lift * 2) / 2, ly = Math.round(lift);
+  const top = desk - 4 - ly;
+  const k = st.mark ? A : G;
+  const up = st.hand > .7, mid = st.hand > .3 && !up;
+  // голова
+  text(cx - 1, top, '.-.', k);
+  text(cx - 2, top + 1, st.hand > .3 || st.lift > .5 ? '(^o^)' : '(o.o)', k);
+  // тело
+  text(cx - 2, top + 2, up ? '/|#|' : '/|#|\\', k);
+  for (let y = top + 3; y < desk; y++) text(cx - 1, y, '|#|', k);
+  // поднятая рука
+  if (up) {
+    put(cx + 2, top + 2, '/', C); put(cx + 3, top + 1, '/', C);
+    put(cx + 3, top, Math.floor(t * 5) % 2 ? 'Y' : 'y', C);
+  } else if (mid) { put(cx + 3, top + 2, '/', C); put(cx + 3, top + 1, '.', C); }
+  // парта (перекрывает ноги)
+  const dk = st.mark ? A : 'rgba(95,255,136,.8)';
+  text(cx - 3, desk, '▄▄▄▄▄▄▄', dk); text(cx - 3, desk + 1, '╹     ╹', dk);
+  // имя
+  const nm = NAMES[i] + (st.done ? '✓' : '');
+  centerText(cx, desk + 2, nm, st.done ? A : st.mark ? A : DIM);
+  if (st.mark && st.hand < .5 && !st.done && st.lift > 0) put(cx, top - 1, '▼', A);
+  return { cx, top };
+}
+function bresenham(x0, y0, x1, y1) {
+  const pts = []; let dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+  for (;;) { pts.push([x0, y0]); if (x0 === x1 && y0 === y1) break; const e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+  return pts;
+}
+function drawTeacher(o, t) {
+  const tx = 3, ty = 3 + Math.max(0, L.boardH - 6) , k = C;
+  const pointing = !!o.ray;
+  const sp = [' .---. ', '( ^_^ )', pointing ? ' /|=|==' : ' /|=|\\ ', '/ |#| \\', '  | |  ', '  d b  '];
+  sp.forEach((s, i) => text(tx, ty + i, s, k));
+  put(tx + 3, ty - 1, '⌐', 'rgba(125,221,255,.6)');
+  centerText(tx + 3, ty + 6, 'УЧИТЕЛЬ', DIM);
+  return { hx: tx + 7, hy: ty + 2 };
+}
+function drawScene(o, t, ms) {
+  // фон: тусклые точки пола/стены
+  for (let y = 3; y < rows - 3; y++) for (let x = 0; x < cols; x++) {
+    const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453 % 1;
+    if (n > .965) put(x, y, '.', `rgba(80,160,100,${.12 + .1 * Math.sin(ms / 900 + x + y)})`);
+  }
+  // шапка
+  for (let x = 0; x < cols; x++) put(x, 2, '═', 'rgba(95,255,136,.35)');
+  text(2, 1, '▌КЛАСС.ASCII', A);
+  const rt = o.end ? 'КОНЕЦ' : o.round ? `РАУНД ${o.round}/${R}` : 'ВСТУПЛЕНИЕ';
+  text(cols - rt.length - 2, 1, rt, G);
+  // доска
+  const bx = Math.min(16, Math.floor(cols * .28)), bw = cols - bx - 2;
+  box(bx, 3, bw, L.boardH, G);
+  centerText(bx + bw / 2, 4, o.q, A);
+  if (L.boardH >= 7) { for (let x = 3; x < bw - 3; x++) put(bx + x, 5, '┈', 'rgba(95,255,136,.3)'); }
+  if (o.say) centerText(bx + bw / 2, 3 + L.boardH - 2, `Учитель: «${o.say}»`.slice(0, bw - 4), C);
+  const hand = drawTeacher(o, t);
+  // ученики: сначала задний ряд, потом передний
+  const heads = [];
+  for (let i = 0; i < 10; i++) heads[i] = drawStudent(i, o.S[i], t);
+  // луч указки
+  if (o.ray) {
+    const h = heads[o.ray.to], pts = bresenham(hand.hx + 1, hand.hy, h.cx, h.top - 1);
+    const n = Math.floor(pts.length * o.ray.p);
+    for (let j = 1; j < n; j++) put(pts[j][0], pts[j][1], j % 2 ? '·' : ':', A);
+    if (o.ray.p >= 1) put(h.cx, h.top - 1, '▼', A);
+  }
+  // реплика ученика
+  if (o.bubble) {
+    const { cx, top } = heads[o.bubble.i], s = ` ${o.bubble.s} `;
+    const w = s.length + 2, x = clamp(cx - Math.floor(w / 2), 1, cols - w - 1), y = Math.max(4, top - 4);
+    box(x, y, w, 3, A); text(x + 1, y + 1, s, A); put(cx, y + 3, '▽', A);
+  }
+  // HUD
+  const prog = o.round ? (o.answered + (o.end ? 0 : 0)) : 0;
+  const bar = '█'.repeat(prog) + '░'.repeat(R - prog);
+  text(2, rows - 2, `ответили: [${bar}] ${prog}/${R}`, G);
+  if (!o.round && !o.end) {
+    if (Math.floor(ms / 500) % 2) centerText(cols / 2, rows - 3, '▼  ПРОКРУТИ ВНИЗ  ▼', A);
+  } else if (o.end) centerText(cols / 2, rows - 3, `★ ${R} ИЗ 10 ОТВЕТИЛИ · ПРОКРУТИ ВВЕРХ, ЧТОБЫ ПОВТОРИТЬ ★`.slice(0, cols - 2), A);
+}
+
+// ---------- цикл ----------
+let ps = 0;
+function frame(ms) {
+  const max = document.documentElement.scrollHeight - innerHeight;
+  const target = max > 0 ? clamp(scrollY / max) : 0;
+  ps += (target - ps) * .14; if (Math.abs(target - ps) < 1e-4) ps = target;
+  chars.fill(undefined);
+  drawScene(stateAt(ps * TOTAL), ms / 1000, ms);
+  ctx.fillStyle = '#020503'; ctx.fillRect(0, 0, W, H);
+  let last = null;
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const i = y * cols + x, c = chars[i];
+    if (!c || c === ' ') continue;
+    if (colr[i] !== last) ctx.fillStyle = last = colr[i];
+    ctx.fillText(c, x * cw, y * ch);
+  }
+  requestAnimationFrame(frame);
+}
+window.__setProgress = p => { scrollTo(0, p * (document.documentElement.scrollHeight - innerHeight)); ps = p; };
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
