@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASCII.SITE</title>
+<style>
+  html,body{margin:0;height:100%;background:#020503;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh;cursor:default}
+  noscript{color:#3f6;font:16px monospace;padding:2em;display:block}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="ASCII сайт: меню — Главная, Работы, О нас, Контакты"></canvas>
+<noscript>Нужен JavaScript.</noscript>
+<script>
+(() => {
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const RAMP = ' .`,:;-~+=*xoOX#%@';
+const PAGES = ['ГЛАВНАЯ', 'РАБОТЫ', 'О НАС', 'КОНТАКТЫ'];
+const CONTENT = {
+  0: { title: 'ASCII', lines: [
+    'Весь этот сайт — таблица символов.',
+    'Ни одной картинки, ни одного градиента:',
+    'фон, заголовки, кнопки и текст рисуются',
+    'в одну общую сетку символов.',
+    '',
+    'Наведи мышь — вода пойдёт рябью.',
+    'Клавиши 1–4 переключают страницы.' ]},
+  1: { title: 'РАБОТЫ', lines: [
+    '[01] Тор из символов (справа)',
+    '[02] Вода и трава: шум + рябь от мыши',
+    '[03] Заголовки: любой шрифт -> символы',
+    '[04] Интерфейс: кнопки, рамки, hover',
+    '',
+    'Дальше: 3D-сцены, видео, игры.' ]},
+  2: { title: 'О НАС', lines: [
+    'Идея: взять эстетику ASCII-рендера',
+    'и сделать из неё настоящий сайт.',
+    '',
+    'Технически: canvas + сетка символов,',
+    'яркость пикселя -> символ из рампы,',
+    'цвет -> зелёный / янтарный.' ]},
+  3: { title: 'КОНТАКТЫ', lines: [
+    'hello@ascii.site',
+    '',
+    '[ написать ]   [ GitHub ]   [ Telegram ]',
+    '',
+    '(кнопки — заглушки для прототипа)' ]},
+};
+
+let W, H, cols, rows, cw, ch, dpr;
+let chars, cols_, page = 0, mouse = {x: -99, y: -99, t: -99}, ripples = [];
+const off = document.createElement('canvas'), octx = off.getContext('2d', {willReadFrequently: true});
+let titleCache = {};
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const fs = W < 600 ? 11 : 14;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = `${fs}px "DejaVu Sans Mono", Menlo, Consolas, monospace`;
+  ctx.textBaseline = 'top';
+  cw = ctx.measureText('M').width; ch = Math.round(fs * 1.15);
+  cols = Math.floor(W / cw); rows = Math.floor(H / ch);
+  chars = new Array(cols * rows); cols_ = new Array(cols * rows);
+  titleCache = {};
+}
+addEventListener('resize', resize); resize();
+
+const idx = (x, y) => y * cols + x;
+function put(x, y, c, color) {
+  if (x < 0 || y < 0 || x >= cols || y >= rows) return;
+  chars[idx(x, y)] = c; cols_[idx(x, y)] = color;
+}
+function text(x, y, s, color) { for (let i = 0; i < s.length; i++) put(x + i, y, s[i], color); }
+function clearRect(x0, y0, w, h) {
+  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) put(x, y, ' ', null);
+}
+function box(x0, y0, w, h, color) {
+  clearRect(x0, y0, w, h);
+  put(x0, y0, '┌', color); put(x0 + w - 1, y0, '┐', color);
+  put(x0, y0 + h - 1, '└', color); put(x0 + w - 1, y0 + h - 1, '┘', color);
+  for (let x = 1; x < w - 1; x++) { put(x0 + x, y0, '─', color); put(x0 + x, y0 + h - 1, '─', color); }
+  for (let y = 1; y < h - 1; y++) { put(x0, y0 + y, '│', color); put(x0 + w - 1, y0 + y, '│', color); }
+}
+
+// любой текст любым шрифтом -> сетка символов
+function bigText(str, maxCols) {
+  const key = str + maxCols;
+  if (titleCache[key]) return titleCache[key];
+  const size = 120;
+  octx.font = `bold ${size}px "DejaVu Sans Mono", monospace`;
+  const tw = Math.ceil(octx.measureText(str).width) + 8;
+  off.width = tw; off.height = size + 20;
+  octx.font = `bold ${size}px "DejaVu Sans Mono", monospace`;
+  octx.textBaseline = 'top'; octx.fillStyle = '#fff'; octx.fillText(str, 4, 4);
+  const gh = 7, gw = Math.min(maxCols, Math.round(tw / (size + 20) * gh * (ch / cw)));
+  const data = octx.getImageData(0, 0, off.width, off.height).data;
+  const out = [];
+  for (let y = 0; y < gh; y++) {
+    let row = '';
+    for (let x = 0; x < gw; x++) {
+      let sum = 0, n = 0;
+      const x0 = Math.floor(x * off.width / gw), x1 = Math.floor((x + 1) * off.width / gw);
+      const y0 = Math.floor(y * off.height / gh), y1 = Math.floor((y + 1) * off.height / gh);
+      for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) { sum += data[(yy * off.width + xx) * 4 + 3]; n++; }
+      const v = n ? sum / n / 255 : 0;
+      row += v < .15 ? ' ' : v < .4 ? '░' : v < .65 ? '▒' : v < .85 ? '▓' : '█';
+    }
+    out.push(row);
+  }
+  return (titleCache[key] = out);
+}
+
+// ---------- фон: вода + трава ----------
+function field(x, y, t) {
+  const u = x / cols, v = y / rows * (rows / cols) * 2.2;
+  let a = Math.sin(u * 14 + t * .9) + Math.sin(v * 17 - t * 1.3) + Math.sin((u + v) * 9 + t * .6);
+  a += Math.sin(Math.hypot(u - .3, v - .5) * 22 - t * 2);
+  for (const r of ripples) {
+    const d = Math.hypot(x - r.x, (y - r.y) * 2) - (t - r.t) * 22;
+    if (Math.abs(d) < 5) a += Math.cos(d * 1.2) * (1 - (t - r.t) / 4) * 2.2;
+  }
+  return a;
+}
+function drawBackground(t) {
+  const horizon = Math.floor(rows * .55);
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const a = field(x, y, t);
+    if (y > horizon) { // вода
+      const k = Math.max(0, Math.min(1, (a + 3) / 8)) * .55;
+      put(x, y, RAMP[Math.floor(k * (RAMP.length - 1))], `rgb(40,${90 + k * 220 | 0},${70 + k * 90 | 0})`);
+    } else { // «трава» / небо из штрихов
+      const sway = Math.sin(x * .3 + t * 1.5 + y * .2);
+      const g = Math.max(0, (y - horizon * .55) / (horizon * .45));
+      const n = (Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1;
+      if (n > .55 - g * .35) {
+        put(x, y, sway > .3 ? '/' : sway < -.3 ? '\\' : '|', `rgba(70,${120 + g * 100 | 0},60,${.25 + g * .5})`);
+      } else put(x, y, ' ', null);
+    }
+  }
+}
+
+// ---------- 3D-тор ----------
+function drawTorus(t, cx, cy, R) {
+  const A = t * .8, B = t * .5, sA = Math.sin(A), cA = Math.cos(A), sB = Math.sin(B), cB = Math.cos(B);
+  const zb = new Float32Array(cols * rows);
+  const L = '.,-~:;=!*#$@';
+  for (let th = 0; th < 6.283; th += .07) {
+    const ct = Math.cos(th), st = Math.sin(th);
+    for (let ph = 0; ph < 6.283; ph += .02) {
+      const cp = Math.cos(ph), sp = Math.sin(ph);
+      const h = ct + 2, D = 1 / (sp * h * sA + st * cA + 5);
+      const tt = sp * h * cA - st * sA;
+      const x = Math.floor(cx + R * 2 * D * (cp * h * cB - tt * sB));
+      const y = Math.floor(cy + R * D * (cp * h * sB + tt * cB));
+      const N = Math.floor(8 * ((st * sA - sp * ct * cA) * cB - sp * ct * sA - st * cA - cp * ct * sB));
+      if (x >= 0 && x < cols && y >= 0 && y < rows && D > zb[idx(x, y)]) {
+        zb[idx(x, y)] = D;
+        const l = Math.max(2, Math.min(L.length - 1, N));
+        put(x, y, L[l], `rgb(255,${150 + l * 8},${40 + l * 6})`);
+      }
+    }
+  }
+}
+
+// ---------- интерфейс ----------
+let hits = [];
+function drawUI(t) {
+  hits = [];
+  const GREEN = '#5f8', AMBER = '#fb4', DIM = '#8c9';
+  // шапка
+  clearRect(0, 0, cols, 3);
+  text(2, 1, '▌ASCII.SITE', AMBER);
+  const narrowNav = cols < 60;
+  const labels = PAGES.map((p, i) => narrowNav ? `[${i + 1}]` : `[${i + 1}] ${p}`);
+  let x = Math.max(16, cols - labels.reduce((s, l) => s + l.length + 3, 0) - 1);
+  PAGES.forEach((p, i) => {
+    const label = labels[i];
+    const hot = mouse.y === 1 && mouse.x >= x && mouse.x < x + label.length;
+    const color = i === page ? AMBER : hot ? '#fff' : GREEN;
+    if (i === page || hot) for (let k = 0; k < label.length; k++) put(x + k, 2, '▔', color);
+    text(x, 1, label, color);
+    hits.push({ x0: x, x1: x + label.length, y: 1, go: i });
+    x += label.length + 3;
+  });
+  for (let i = 0; i < cols; i++) put(i, 3, '═', 'rgba(95,255,136,.4)');
+
+  // контент
+  const c = CONTENT[page], narrow = cols < 70;
+  const bw = Math.min(cols - 4, narrow ? cols - 4 : 52);
+  const bx = 2, by = 5;
+  const title = bigText(c.title, bw - 4);
+  const bh = Math.min(rows - by - 3, title.length + c.lines.length + 6);
+  box(bx, by, bw, bh, GREEN);
+  title.forEach((row, i) => text(bx + 2, by + 1 + i, row.slice(0, bw - 4), AMBER));
+  const ty = by + title.length + 2;
+  c.lines.forEach((l, i) => {
+    const s = l.slice(0, bw - 4);
+    if (ty + i < by + bh - 1) text(bx + 2, ty + i, s, DIM);
+  });
+  // курсор
+  const cur = Math.floor(t * 2) % 2 ? '█' : ' ';
+  put(bx + 2, Math.min(by + bh - 2, ty + c.lines.length), cur, GREEN);
+  // подвал
+  text(2, rows - 1, 'canvas · ' + cols + '×' + rows + ' символов · клик по воде = рябь', 'rgba(150,255,170,.55)');
+}
+
+function frame(ms) {
+  const t = ms / 1000;
+  ripples = ripples.filter(r => t - r.t < 4);
+  drawBackground(t);
+  if (cols > 70) drawTorus(t, cols * .74, rows * .42, Math.min(rows, cols / 2) * .36);
+  drawUI(t);
+  ctx.fillStyle = '#020503'; ctx.fillRect(0, 0, W, H);
+  let last = null;
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const i = idx(x, y), c = chars[i];
+    if (!c || c === ' ') continue;
+    if (cols_[i] !== last) { ctx.fillStyle = last = cols_[i]; }
+    ctx.fillText(c, x * cw, y * ch);
+  }
+  requestAnimationFrame(frame);
+}
+
+function cell(e) { return { x: Math.floor(e.clientX / cw), y: Math.floor(e.clientY / ch) }; }
+cv.addEventListener('pointermove', e => {
+  Object.assign(mouse, cell(e));
+  cv.style.cursor = hits.some(h => mouse.y === h.y && mouse.x >= h.x0 && mouse.x < h.x1) ? 'pointer' : 'default';
+});
+cv.addEventListener('pointerdown', e => {
+  const p = cell(e);
+  const h = hits.find(h => p.y === h.y && p.x >= h.x0 && p.x < h.x1);
+  if (h) page = h.go; else ripples.push({ x: p.x, y: p.y, t: performance.now() / 1000 });
+});
+addEventListener('keydown', e => { const n = +e.key; if (n >= 1 && n <= 4) page = n - 1; });
+
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
